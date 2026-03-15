@@ -3146,3 +3146,179 @@ int main() {
 }
 ```
 
+#### 非模板  C语言 运行时可变参数
+
+```c++
+#include <stdio.h>
+#include <stdarg.h>
+
+// 第一个参数 num 是固定参数，代表后面有多少个可变参数
+double average(int num, ...) {
+    va_list valist;
+    double sum = 0.0;
+    int i;
+
+    // 1. 初始化 valist，使其指向第一个可变参数
+    va_start(valist, num);
+
+    // 2. 循环访问每一个参数
+    for (i = 0; i < num; i++) {
+        // va_arg 的第二个参数是期望的数据类型
+        sum += va_arg(valist, int);
+    }
+
+    // 3. 清理内存
+    va_end(valist);
+
+    return sum / num;
+}
+
+int main() {
+    printf("Average of 2, 3, 4, 5 = %f\n", average(4, 2, 3, 4, 5));
+    printf("Average of 5, 10, 15 = %f\n", average(3, 5, 10, 15));
+    return 0;
+}
+```
+
+
+
+### 萃取与标签分发
+
+```c++
+#include <iostream>
+#include <type_traits>
+#include <vector>
+#include <iterator>
+#include <string>
+
+// =========================================================================
+// 1. 标签分发 (Tag Dispatching)
+// =========================================================================
+// 标签分发是利用重载解析和类型标签（如 std::true_type 或迭代器标签）
+// 在编译期选择不同函数实现的技术。
+
+// --- 1.1 使用 std::true_type 和 std::false_type ---
+template <typename T>
+void print_is_integral_impl(T val, std::true_type) {
+    std::cout << val << " 是整数类型 (Integral)\n";
+}
+
+template <typename T>
+void print_is_integral_impl(T val, std::false_type) {
+    std::cout << val << " 不是整数类型 (Non-integral)\n";
+}
+
+template <typename T>
+void print_is_integral(T val) {
+    // 实例化 std::is_integral<T> 并利用 {} 产生对象作为标签进行分发
+    print_is_integral_impl(val, std::is_integral<T>{}); 
+}
+
+// --- 1.2 迭代器标签 (Iterator Tags) 分发 ---
+template <typename Iter>
+void custom_advance_impl(Iter& it, int n, std::random_access_iterator_tag) {
+    std::cout << "使用随机访问迭代器加速移动\n";
+    it += n;
+}
+
+template <typename Iter>
+void custom_advance_impl(Iter& it, int n, std::forward_iterator_tag) {
+    std::cout << "使用前向迭代器单步移动\n";
+    while (n--) ++it;
+}
+
+template <typename Iter>
+void custom_advance(Iter& it, int n) {
+    // 使用 std::iterator_traits 获取迭代器类别（标签）
+    custom_advance_impl(it, n, typename std::iterator_traits<Iter>::iterator_category{});
+}
+
+// =========================================================================
+// 2. 类型查询与判断 (Type Queries)
+// =========================================================================
+void test_type_queries() {
+    std::cout << "\n--- 类型查询 ---\n";
+    
+    // C++11 风格：使用 ::value 获取布尔值
+    bool is_int = std::is_integral<int>::value;               // true
+    bool is_ptr = std::is_pointer<int*>::value;               // true
+    bool is_same = std::is_same<int, const int>::value;       // false (const int 与 int 不同)
+    bool is_base = std::is_base_of<std::true_type, std::is_integral<int>>::value; // true
+
+    // 注意：C++17 引入了 _v 变量模板 (例如 std::is_same_v)，但在 C++11/14 中仍需用 ::value
+    std::cout << "is_same<int, int>::value = " << std::is_same<int, int>::value << "\n";
+}
+
+// =========================================================================
+// 3. 类型修改与转换 (Type Modifiers) - C++11 vs C++14
+// =========================================================================
+void test_type_modifiers() {
+    // 萃取操作常用于去除引用、const修饰符，或者退化类型
+    
+    // --- C++11 风格：使用 typename trait<T>::type ---
+    using Type1 = typename std::remove_reference<int&>::type;       // int
+    using Type2 = typename std::remove_const<const double>::type;   // double
+    
+    // --- C++14 风格：引入了 _t 别名模板，大大简化了书写 ---
+    using Type3 = std::remove_reference_t<int&&>;                   // int
+    using Type4 = std::remove_const_t<const float>;                 // float
+    using Type5 = std::remove_cv_t<const volatile int>;             // int (去除 const 和 volatile)
+
+    // std::decay_t (C++14)：模拟传值时的类型退化（数组转指针，函数转指针，去引用和cv修饰）
+    using Type6 = std::decay_t<int[10]>;                            // int*
+    using Type7 = std::decay_t<void(&)(int)>;                       // void(*)(int)
+}
+
+// =========================================================================
+// 4. 条件编译与 SFINAE (Substitution Failure Is Not An Error)
+// =========================================================================
+
+// --- 4.1 std::conditional / std::conditional_t ---
+// 编译期的三元运算符：条件为true选第一个类型，false选第二个
+using MyType = std::conditional_t<true, int, std::string>; // MyType 为 int
+
+// --- 4.2 std::enable_if / std::enable_if_t (C++14) ---
+// SFINAE 核心工具：当条件不满足时，该模板会被忽略而不会导致编译报错
+
+// 版本A：仅当 T 是浮点数时启用
+template <typename T>
+std::enable_if_t<std::is_floating_point<T>::value, T> 
+process_number(T val) {
+    std::cout << val << " 是浮点数\n";
+    return val * 2.5;
+}
+
+// 版本B：仅当 T 是整数类型时启用 (配合非类型模板参数的写法)
+template <typename T, typename = std::enable_if_t<std::is_integral<T>::value>>
+void process_number(T val) {
+    std::cout << val << " 是整数\n";
+}
+
+// =========================================================================
+// 主函数测试
+// =========================================================================
+int main() {
+    // 测试标签分发
+    print_is_integral(42);       // 匹配 std::true_type
+    print_is_integral(3.14);     // 匹配 std::false_type
+
+    // 测试迭代器标签分发
+    std::vector<int> vec = {1, 2, 3, 4, 5};
+    auto it = vec.begin();
+    custom_advance(it, 2);       // Vector 迭代器是 Random Access
+    std::cout << "移动后的值: " << *it << "\n";
+
+    // 测试类型查询
+    test_type_queries();
+
+    // 测试 SFINAE
+    std::cout << "\n--- SFINAE 测试 ---\n";
+    process_number(5);           // 路由到整数版本
+    process_number(5.5f);        // 路由到浮点数版本
+
+    return 0;
+}
+```
+
+
+
