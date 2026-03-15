@@ -2674,7 +2674,7 @@ int main() {
 
 **消息驱动/Actor-like 少共享状态**
 
-## STL新版本引入
+## STL
 
 ### emplace 家族
 
@@ -2699,6 +2699,40 @@ int main() {
 ### vector
 
 不要用 vector\<bool\>, 这个做了特殊处理，不是按照数组存的  是位的存法
+
+### 仿函数
+
+| **容器名称**                     | **默认仿函数 (Template Parameter)** | **底层依赖的运算符重载** | **自定义方式**       |
+| -------------------------------- | ----------------------------------- | ------------------------ | -------------------- |
+| `std::set` / `std::multiset`     | `std::less<Key>`                    | `operator<`              | 传入自定义仿函数类型 |
+| `std::map` / `std::multimap`     | `std::less<Key>`                    | `operator<`              | 传入自定义仿函数类型 |
+| `std::priority_queue` (优先队列) | `std::less<T>`                      | `operator<`              | 传入自定义仿函数类型 |
+
+| **容器名称**                      | **默认哈希仿函数** | **默认相等仿函数**   | **底层依赖的运算符重载** |
+| --------------------------------- | ------------------ | -------------------- | ------------------------ |
+| `std::unordered_set` / `multiset` | `std::hash<Key>`   | `std::equal_to<Key>` | `operator==`             |
+| `std::unordered_map` / `multimap` | `std::hash<Key>`   | `std::equal_to<Key>` | `operator==`             |
+
+```c++
+#include <queue>
+#include <vector>
+
+struct MinHeapCompare {
+    bool operator()(int a, int b) const {
+        return a > b; // 在优先队列中，返回 true 表示 a 的优先级比 b 低（被排在后面）
+    }
+};
+
+int main() {
+    // 优先队列参数：元素类型, 容器类型, 仿函数类型
+    std::priority_queue<int, std::vector<int>, MinHeapCompare> pq;
+    pq.push(10);
+    pq.push(5);
+    pq.push(20);
+
+    // 此时 pq.top() 将会是 5
+}
+```
 
 
 
@@ -3199,14 +3233,7 @@ struct NotDerived {};
 // =========================================================================
 // 1. 标签分发 (Tag Dispatching)
 // =========================================================================
-/* * 【核心原理解析】：
- * 标签分发的作用时机是：编译期的 函数重载解析 (Overload Resolution) 阶段。
- * 注意：这里的 print_is_integral_impl 并不是某个主模板的“特化”，
- * 它们被编译器视作两个完全平级的、同名的 独立函数重载。
- * 编译器只是利用了传入的标签对象（真/假），通过基础的形参匹配规则，帮你选出正确的版本。
- */
-
-// --- 1.1 使用 std::true_type 和 std::false_type ---
+// (此部分纯 C++11 即可运行，无需修改)
 template <typename T>
 void print_is_integral_impl(T val, std::true_type) {
     std::cout << val << " 是整数类型 (匹配 true_type 重载)\n";
@@ -3222,15 +3249,6 @@ void print_is_integral(T val) {
     print_is_integral_impl(val, std::is_integral<T>{}); 
 }
 
-/* * 【标签的本质与优势】：
- * 空标签实际上就是多传了一个参数类型，在编译期的时候弄出来了一个重载。
- * 理论上可以传入任何类型（借助函数参数不一致的重载）。
- * 业界惯例是传入空结构体或 std:: 提供的标签，因为：
- * 1. 零开销 (EBO)：空结构体在编译后被优化，运行时栈内不占任何空间。
- * 2. 自动降级 (Fallback)：结构体可以继承，当精确匹配不到子类标签时，
- * 根据 C++ 规则会自动隐式转换为父类，匹配父类标签的重载函数。
- */
-// --- 1.2 迭代器标签 (Iterator Tags) 分发 ---
 template <typename Iter>
 void custom_advance_impl(Iter& it, int n, std::random_access_iterator_tag) {
     std::cout << "使用随机访问迭代器加速移动\n";
@@ -3251,126 +3269,129 @@ void custom_advance(Iter& it, int n) {
 // =========================================================================
 // 2. 类型查询与判断 (Type Queries) - 包含“带壳”判断失败的陷阱
 // =========================================================================
+// (此处使用的是 C++11 的 ::value，如果在 C++17 中，可简写为 _v)
 void test_type_queries() {
     std::cout << "\n--- 类型查询与陷阱 ---\n";
     
-    // 【陷阱 1：is_same 严格匹配】
-    // const 和 引用 会导致 is_same 判断为 false
     bool is_same_1 = std::is_same<int, const int>::value;         // false
     bool is_same_2 = std::is_same<int, int&>::value;              // false
     std::cout << "is_same<int, const int>::value = " << is_same_1 << "\n";
 
-    // 【陷阱 2：is_base_of 与引用】
-    // is_base_of 会忽略底层的 cv 修饰，但如果你传入的是“引用类型”，它会直接返回 false！
-    bool is_base_1 = std::is_base_of<Base, Derived>::value;       // true (正常)
-    bool is_base_2 = std::is_base_of<Base, const Derived>::value; // true (cv修饰被安全忽略)
-    bool is_base_3 = std::is_base_of<Base, Derived&>::value;      // false! 引用导致判断失败
+    bool is_base_1 = std::is_base_of<Base, Derived>::value;       // true 
+    bool is_base_2 = std::is_base_of<Base, const Derived>::value; // true 
+    bool is_base_3 = std::is_base_of<Base, Derived&>::value;      // false! 
     std::cout << "is_base_of<Base, Derived&>::value = " << is_base_3 << " (陷阱！)\n";
 }
 
 // =========================================================================
 // 3. 类型修改、转换与“脱壳” (Type Modifiers & Peeling)
 // =========================================================================
-/*
- * 【脱壳技巧】：
- * 当我们在模板中接收参数 `T&&` (万能引用) 或 `const T&` 时，T 推导出来往往带有引用或 cv 修饰。
- * 在进行类型对比前，必须先脱去这些外壳，还原其核心类型。
- */
+template <typename T>
+struct remove_reference {
+    using type = T; // 1. 主模板：如果不是引用，直接返回 T
+};
+
 void test_type_modifiers() {
     std::cout << "\n--- 类型脱壳演示 ---\n";
 
-    using HardShellType = const Derived&; // 这是一个带 const 和 引用 的强力外壳类型
+    using HardShellType = const Derived&; 
 
-    // 方案 1 (C++14)：组合拳脱壳 - 先去引用，再去 cv
-    // 注意顺序：必须先去引用，因为对引用去 cv 是无效的！
-    using RawType1 = std::remove_cv_t<std::remove_reference_t<HardShellType>>;
+    // --- 方案 1：组合拳脱壳 - 先去引用，再去 cv ---
+    // 【C++11 方式】：需要使用 typename 和 ::type，嵌套起来非常长
+    using RawType1_CXX11 = typename std::remove_cv<
+                               typename std::remove_reference<HardShellType>::type
+                           >::type;
+                           
+    // 【C++14 方式】：使用 _t 别名后缀，去掉了繁琐的 typename 和 ::type
+    using RawType1_CXX14 = std::remove_cv_t<std::remove_reference_t<HardShellType>>;
     
-    // 方案 2 (C++14)：终极脱壳神器 std::decay_t (退化)
-    // 它不仅去引用、去 cv，还会把数组退化为指针，函数退化为函数指针。模拟了按值传递时的类型。
-    using RawType2 = std::decay_t<HardShellType>;
+    // --- 方案 2：终极脱壳神器 decay (退化) ---
+    // 【C++11 方式】
+    using RawType2_CXX11 = typename std::decay<HardShellType>::type;
+    
+    // 【C++14 方式】
+    using RawType2_CXX14 = std::decay_t<HardShellType>;
 
-    // 脱壳后再次进行基类判断：
-    bool is_base_peeled = std::is_base_of<Base, RawType2>::value; // true!
-    std::cout << "脱壳后 is_base_of<Base, RawType2>::value = " << is_base_peeled << " (成功！)\n";
+    // 验证脱壳结果 (以 C++11 的脱壳结果为例)
+    bool is_base_peeled = std::is_base_of<Base, RawType2_CXX11>::value; 
+    std::cout << "脱壳后 is_base_of<Base, RawType2_CXX11>::value = " << is_base_peeled << " (成功！)\n";
 }
 
 // =========================================================================
 // 4. 条件编译与 SFINAE (Substitution Failure Is Not An Error)
 // =========================================================================
-/* * 【作用时机与机制对比】：
- * 1. std::conditional：纯粹的编译期“三元运算符”，只做类型推导，不涉及重载淘汰。
- * 2. std::enable_if：作用于 重载候选集筛选 阶段。条件为 false 时产生替换失败，
- * 静悄悄地把该重载划掉，只留下条件为 true 的重载函数。
- */
 
-using MyType = std::conditional_t<true, int, std::string>; 
+// 【C++11 方式】的三元运算
+using MyType_CXX11 = typename std::conditional<true, int, std::string>::type; 
+// 【C++14 方式】的三元运算
+using MyType_CXX14 = std::conditional_t<true, int, std::string>; 
 
-// 版本A：仅当 T 脱壳后 是浮点数时存活
+// ================= 版本A：仅当 T 脱壳后 是浮点数时存活 =================
+// 【C++11 方式】：使用 typename std::enable_if<...>::type 以及 typename std::decay<...>::type
 template <typename T>
-std::enable_if_t<std::is_floating_point<std::decay_t<T>>::value, std::decay_t<T>> 
+typename std::enable_if<
+    std::is_floating_point<typename std::decay<T>::type>::value, 
+    typename std::decay<T>::type
+>::type 
 process_number(T&& val) {
-    std::cout << val << " 是浮点数 (已脱壳处理)\n";
+    std::cout << val << " 是浮点数 (C++11 方式脱壳处理)\n";
     return val * 2.5;
 }
 
-// 版本B：仅当 T 脱壳后 是整数类型时存活
-template <typename T, typename = std::enable_if_t<std::is_integral<std::decay_t<T>>::value>>
+/* // 【C++14 方式】：对比上面的 C++11，代码显著精简
+template <typename T>
+std::enable_if_t<std::is_floating_point<std::decay_t<T>>::value, std::decay_t<T>> 
+process_number(T&& val) {
+    std::cout << val << " 是浮点数 (C++14 方式脱壳处理)\n";
+    return val * 2.5;
+}
+*/
+
+// ================= 版本B：仅当 T 脱壳后 是整数类型时存活 =================
+// 【C++11 方式】：作为模板默认参数使用 enable_if
+template <typename T, 
+          typename = typename std::enable_if<
+              std::is_integral<typename std::decay<T>::type>::value
+          >::type>
 void process_number(T&& val) {
-    std::cout << val << " 是整数 (已脱壳处理)\n";
+    std::cout << val << " 是整数 (C++11 方式脱壳处理)\n";
 }
 
+/*
+// 【C++14 方式】：
+template <typename T, typename = std::enable_if_t<std::is_integral<std::decay_t<T>>::value>>
+void process_number(T&& val) {
+    std::cout << val << " 是整数 (C++14 方式脱壳处理)\n";
+}
+*/
 
 // =========================================================================
-// 5. 萃取工具的底层实现原理 (How Traits Work Under the Hood)
+// 5. 萃取工具的底层实现原理 (C++11 及之前就已经确立的机制)
 // =========================================================================
 namespace my_std {
 
-    // --- 5.1 基础查询机制：全特化白名单 (以 is_floating_point 为例) ---
-    // 原理：定义主模板全部返回 false_type。然后针对标准规定的几个类型进行全特化，
-    // 让它们继承 true_type。编译器在实例化时会优先匹配特化版本。
-
     template <typename T> 
-    struct is_floating_point : std::false_type {}; // 默认黑名单
+    struct is_floating_point : std::false_type {}; 
 
-    // 白名单特化
     template <> struct is_floating_point<float>       : std::true_type {};
     template <> struct is_floating_point<double>      : std::true_type {};
     template <> struct is_floating_point<long double> : std::true_type {};
-    
-    // (真正的标准库还会用 std::remove_cv 脱去 const/volatile 后再去匹配白名单)
-
-
-    // --- 5.2 复杂查询机制：SFINAE + sizeof 探测 (以 is_base_of 为例) ---
-    // 原理：我们无法枚举所有的基类和派生类，所以必须动态探测。
-    // 如果 Derived 继承自 Base，那么 Derived* 就可以隐式转换为 Base*。
-    // 我们利用 SFINAE 构造两个重载函数，看编译器在传参 Derived* 时选择了哪一个。
 
     template <typename B, typename D>
     struct is_base_of {
     private:
-        // 定义两个大小确定的类型，用于后续的 sizeof 对比
         typedef char yes[1];
         typedef char no[2];
 
-        // 探测通道 1：如果传入的指针能转换为 B*，优先匹配这个
-        // 注意：函数不需要实现，因为 sizeof 只在编译期分析类型，不产生实际调用
         static yes& test(B*);
-
-        // 探测通道 2：C 风格可变参数 (...) 是重载匹配里的“最差选择” (Fallback)
-        // 如果通道 1 转换失败（不是继承关系），就会掉进这里
         static no& test(...);
 
     public:
-        // 核心魔法：
-        // 1. static_cast<D*>(nullptr) 伪造一个 D* 空指针。
-        // 2. 将其传入 test() 函数。
-        // 3. 编译器进行重载解析，如果 D 是 B 的派生类，它会选择 test(B*)，返回 yes&。
-        // 4. sizeof(yes) == sizeof(yes) 为 true。否则返回 no&，比较为 false。
+        // C++11 的 constexpr 支持在这里非常关键
         static constexpr bool value = sizeof(test(static_cast<D*>(nullptr))) == sizeof(yes);
     };
 
 } // namespace my_std
-
 
 // =========================================================================
 // 主函数测试
@@ -3389,6 +3410,7 @@ int main() {
     std::cout << "\n--- SFINAE (配合万能引用脱壳) 测试 ---\n";
     int a = 5;
     const float b = 5.5f;
+    // 这里会调用 C++11 方式定义的函数重载
     process_number(a);           
     process_number(b);           
 
@@ -3657,11 +3679,15 @@ int main() {
      * std::bind 本质上是一个模板工厂函数。当你调用它时，编译器在底层为你动态生成了一个
      * 隐藏的“仿函数（Functor）”类。
      * 这个类内部使用 std::tuple 偷偷保存了你传给它的所有绑定的参数（比如下面的 99）。
+     * 递归解包，把值逐步替换到原函数的参数tuple，然后传给那个函数
      * 当你最终调用它时，它把存好的 99 和传进来的占位符参数拼在一起，再去调用原函数。
+     * 占位符还是定义好的.... 意味着他不是无限延申
      */
 
     // 需求：假如我们现在只需要打印 ID 为 99 的用户，想把第一个参数“定死”
     // 使用 std::placeholders::_1 作为保留给未来的第一个参数的位置
+    // 按顺序放的  99放到print_user_info 第一个参数
+    // std::placeholders::_1代表把bind_name_only的第一个参数放到print_user_info第二个参数
     std::function<void(std::string)> bind_name_only = std::bind(print_user_info, 99, std::placeholders::_1);
     
     // 现在调用只需要传一个参数了，99 已经被“压缩”进去了
@@ -3708,4 +3734,223 @@ int main() {
     return 0;
 }
 ```
+
+
+
+### lambda
+
+> 通过编译器生成一个匿名类，将外部要捕获的值作为成员变量存放。重载了（）用于直接调用函数。
+>
+> C++14 引入的泛型 Lambda，是借助类模板的方式完成
+
+#### 基本语法
+
+```c++
+[capture](parameters) mutable -> return_type { body }
+```
+
+| **组成部分**  | **名称**                      | **作用**                                                     |
+| ------------- | ----------------------------- | ------------------------------------------------------------ |
+| **`[]`**      | **捕获列表 (Capture Clause)** | 定义 Lambda 可以访问外部作用域中的哪些变量，以及是以**值**还是**引用**方式访问。 |
+| **`()`**      | **参数列表 (Parameter List)** | 与普通函数一致。如果不需要参数，在 C++11 中可以省略。        |
+| **`mutable`** | **说明符 (Optional)**         | 默认情况下，按值捕获的变量在 Lambda 内部是 `const` 的。加上它就可以修改这些副本。 |
+| **`-> type`** | **返回类型 (Return Type)**    | 尾置返回类型。大多数情况下编译器能自动推导，可以省略。       |
+| **`{}`**      | **函数体 (Function Body)**    | 执行的具体逻辑。                                             |
+
+```c++
+#include <iostream>
+#include <memory>
+#include <string>
+
+class LambdaCheatSheet {
+    int member_var = 10;
+
+public:
+    void demonstrate() {
+        int x = 10;
+        int y = 20;
+
+        // ==========================================
+        // 1. 最简形式与标准语法 (C++11)
+        // 完整语法: [capture](params) mutable -> return_type { body }
+        // ==========================================
+        
+        // 简写：没有参数和返回类型时，() 和 -> void 都可以省略
+        auto basic = []{ std::cout << "Hello Lambda!\n"; };
+        basic(); 
+
+        // 带有尾置返回类型（当内部逻辑复杂，编译器无法自动推导时使用）
+        auto explicit_ret = [](double d) -> int { 
+            return static_cast<int>(d); 
+        };
+        // 也可以直接调用  无需先拿变量
+        auto ret = [](double d) -> int { 
+            return static_cast<int>(d); 
+        }(123.123);
+
+        // ==========================================
+        // 2. 基础捕获：值与引用 (C++11)
+        // ==========================================
+        
+        // [x, y] : 按值捕获。内部使用的是 x 和 y 的只读副本
+        auto cap_val = [x, y]() { return x + y; };
+        
+        // [&x, &y] : 按引用捕获。内部可以直接修改外部的 x 和 y
+        auto cap_ref = [&x, &y]() { x++; y++; };
+
+        // ==========================================
+        // 3. 隐式/全局捕获 (C++11) —— ⚠️ 实际工程中建议慎用
+        // ==========================================
+        
+        // [=] : 按值捕获外部作用域所有可见的局部变量
+        auto cap_all_val = [=]() { return x + y; };
+        
+        // [&] : 按引用捕获外部作用域所有可见的局部变量
+        auto cap_all_ref = [&]() { x += 10; };
+
+        // ==========================================
+        // 4. 捕获类成员 (C++11)
+        // ==========================================
+        
+        // [this] : 捕获当前对象的指针，从而读写类的成员变量
+        auto cap_this = [this]() { 
+            this->member_var += 100; // 等价于直接写 member_var += 100
+        };
+
+        // ==========================================
+        // 5. mutable 关键字 (C++11)
+        // ==========================================
+        
+        // 默认按值捕获的变量在内部是 const 的。
+        // 加了 mutable，就可以在 Lambda 内部修改这些副本（不影响外部实参）
+        auto mut_lambda = [x]() mutable {
+            x += 5; // 合法：修改的是存在闭包对象里的 x 副本
+            return x;
+        };
+
+        // ==========================================
+        // 6. 泛型 Lambda (⭐ C++14 核心特性)
+        // ==========================================
+        
+        // 参数类型使用 auto，相当于底层生成了模板 operator()
+        auto generic_lambda = [](auto a, auto b) {
+            return a + b; 
+        };
+        // 同一个 Lambda 可以处理不同类型
+        generic_lambda(5, 10);           // 实例化为 int
+        generic_lambda(3.14, 2.71);      // 实例化为 double
+        generic_lambda(std::string("A"), std::string("B")); // 实例化为 string
+
+        // ==========================================
+        // 7. 初始化捕获 / 广义捕获 (⭐ C++14 核心特性)
+        // ==========================================
+        
+        // 场景 A：重命名或在捕获时进行计算
+        auto init_cap = [z = x + y, str = std::string("Test")]() { 
+            std::cout << str << ": " << z << "\n"; 
+        };
+
+        // 场景 B：移动捕获（解决 unique_ptr 等不可拷贝对象传入 Lambda 的问题）
+        auto ptr = std::make_unique<int>(42);
+        
+        // 将外部的 ptr 移动给内部新建的变量 p，彻底接管所有权
+        auto move_cap = [p = std::move(ptr)]() {
+            std::cout << "Unique value: " << *p << "\n";
+        };
+        
+        // 运行到这里时，外部的 ptr 已经是 nullptr 了
+        move_cap(); 
+    }
+};
+```
+
+### 函数指针
+
+```c++
+int (*func_ptr)(int, int);  // 指针声明
+
+typedef  int  (*MathFunc)  (int, int);
+   |      |        |           |
+   |      |        |           +---> 3. 参数列表：这个函数接收两个 int 类型的参数
+   |      |        |
+   |      |        +---------------> 2. 核心定义：* 代表指针，MathFunc 是我们定义出的【新类型名称】
+   |      |
+   |      +------------------------> 4. 返回值：这个函数返回一个 int 类型的值
+   |
+   +-------------------------------> 1. 关键字：告诉编译器，我们不是在声明变量，而是在给类型起别名
+```
+
+### 仿函数
+
+```c++
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+// ==========================================
+// 1. 仿函数的基本语法
+// ==========================================
+class FunctorName {
+public:
+    // 重载 () 运算符
+    // 返回类型 operator()(参数列表) { ... }
+    void operator()(int param) {
+        // 执行的操作
+    }
+};
+
+// ==========================================
+// 2. 仿函数的实际示例：一个带有内部状态的加法器
+// ==========================================
+class Adder {
+private:
+    int base_value; // 仿函数可以拥有内部状态，这是它比普通函数强大的地方
+
+public:
+    // 构造函数：初始化状态
+    Adder(int val) : base_value(val) {}
+
+    // 重载 () 运算符
+    int operator()(int x) const {
+        return base_value + x;
+    }
+};
+
+int main() {
+    // --- 示例 A：基本调用 ---
+    // 创建一个仿函数对象，初始化 base_value 为 10
+    Adder addTen(10); 
+    
+    // 像调用普通函数一样使用对象：addTen(5) 实际上调用了 addTen.operator()(5)
+    std::cout << "10 + 5 = " << addTen(5) << std::endl;   // 输出: 15
+    std::cout << "10 + 20 = " << addTen(20) << std::endl; // 输出: 30
+
+
+    // --- 示例 B：结合 STL 算法使用 ---
+    std::vector<int> numbers = {1, 2, 3, 4, 5};
+    std::cout << "处理前: ";
+    for(int n : numbers) std::cout << n << " ";
+    std::cout << "\n";
+
+    // 将 vector 中的每个元素加上 100
+    // 传入一个临时对象 Adder(100) 作为自定义操作
+    std::transform(numbers.begin(), numbers.end(), numbers.begin(), Adder(100));
+
+    std::cout << "处理后: ";
+    for(int n : numbers) std::cout << n << " "; // 输出: 101 102 103 104 105
+    std::cout << "\n";
+
+    return 0;
+}
+```
+
+
+
+
+
+## 类
+
+### 虚函数
+
+### 继承  
 
