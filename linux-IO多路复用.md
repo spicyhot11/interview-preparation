@@ -3569,3 +3569,143 @@ int main() {
 }
 ```
 
+
+
+## 可调用对象
+
+### 可调用对象
+
+可调用对象在C++11/14中分为
+
+1.  函数指针
+2. 仿函数
+3. function
+4. lambda
+
+### function与bind
+
+```c++
+#include <iostream>
+#include <functional>
+#include <string>
+
+// --- 准备一些测试用的函数和类 ---
+
+// 1. 普通函数：需要两个参数
+void print_user_info(int id, const std::string& name) {
+    std::cout << "[普通函数] User ID: " << id << ", Name: " << name << std::endl;
+}
+
+// 2. 一个带成员函数的类
+class Button {
+public:
+    // 成员函数：隐式包含第一个参数 'this' 指针
+    void on_click(int x, int y) {
+        std::cout << "[成员函数] Button clicked at (" << x << ", " << y << ")" << std::endl;
+    }
+};
+
+
+int main() {
+    std::cout << "========== 第一部分：std::function 常见说明与原理 ==========\n";
+    
+    /*
+     * 【原理解析：std::function 底层是怎么工作的？】
+     * 1. 类型擦除 (Type Erasure)：这是它的核心魔法。不管你塞进去的是普通函数、
+     * Lambda 还是复杂的仿函数类，它都会通过内部的“多态（虚函数或函数指针表）”
+     * 把它们真实的类型“擦除”掉，只对外暴露统一的调用签名。
+     * 2. 小对象优化 (SSO, Small Object Optimization)：为了性能，它内部有一小块固定内存
+     * （通常是 16~32 字节）。如果你装入的 Lambda 捕获的变量很少，它就直接存在这块栈内存里。
+     * 如果捕获的变量太多，超出了这个大小，它就会默默地去堆上申请内存（调用 new）。
+     */
+
+    /*
+     * 【std::function 的优点】
+     * 1. 终极统一：彻底解决了 C++11 之前函数指针、仿函数等类型乱飞的问题。
+     * 2. 极佳的解耦利器：完美适配回调函数（Callback）、事件驱动和任务队列（如线程池）的设计。
+     * * 【std::function 的缺点与隐形开销】
+     * 1. 虚函数开销与反内联：由于底层基于类型擦除机制，通过它调用函数会产生类似虚函数调用的开销，
+     * 并阻碍编译器的 Inline 优化。在极致的性能热点（如每秒调用千万次的算术循环）中应慎用。
+     * 2. 堆分配陷阱：一旦装入的可调用对象过大（超过 SSO 阈值），就会触发 new/delete，带来明显的性能毛刺。
+     * 3. 异常风险：如果是空的 function 对象，直接调用会导致程序抛出 std::bad_function_call 崩溃。
+     */
+
+    // 1. std::function 作为通用包装器
+    // 语法：std::function<返回值(参数1, 参数2)>
+    std::function<void(int, std::string)> func_wrapper;
+
+    // 安全调用规范：调用前最好判空（类似检查空指针）
+    if (!func_wrapper) {
+        std::cout << "func_wrapper 目前为空，不能调用！\n";
+    }
+
+    // 它可以装入普通函数
+    func_wrapper = print_user_info;
+    func_wrapper(1, "Alice");
+
+    // 它也可以装入 Lambda 表达式（现代 C++ 最常用的方式）
+    func_wrapper = [](int id, std::string name) {
+        std::cout << "[Lambda] Custom Print - ID: " << id << ", Name: " << name << std::endl;
+    };
+    func_wrapper(2, "Bob");
+
+
+    std::cout << "\n========== 第二部分：std::bind 使用说明 (压缩参数) ==========\n";
+
+    /*
+     * 【原理解析：std::bind 底层做了什么？】
+     * std::bind 本质上是一个模板工厂函数。当你调用它时，编译器在底层为你动态生成了一个
+     * 隐藏的“仿函数（Functor）”类。
+     * 这个类内部使用 std::tuple 偷偷保存了你传给它的所有绑定的参数（比如下面的 99）。
+     * 当你最终调用它时，它把存好的 99 和传进来的占位符参数拼在一起，再去调用原函数。
+     */
+
+    // 需求：假如我们现在只需要打印 ID 为 99 的用户，想把第一个参数“定死”
+    // 使用 std::placeholders::_1 作为保留给未来的第一个参数的位置
+    std::function<void(std::string)> bind_name_only = std::bind(print_user_info, 99, std::placeholders::_1);
+    
+    // 现在调用只需要传一个参数了，99 已经被“压缩”进去了
+    bind_name_only("Charlie"); 
+
+
+    /*
+     * 【std::bind 的隐形开销与缺点】
+     * 1. 默认值拷贝开销：bind 默认对绑定的参数进行“按值拷贝”。如果绑定大对象，会引发严重的性能退化（除非显式用 std::ref）。
+     * 2. 阻碍内联优化：由于底层被 std::tuple 和复杂的模板推导包裹，编译器很难对其进行 Inline（内联）优化。
+     * 3. 堆内存分配陷阱：由于生成的包装类往往比较臃肿，很容易突破 std::function 内部的“小对象优化(SSO)”限制，
+     * 导致其被迫在堆上动态分配内存（调用 new），严重影响极端性能。
+     * 4. 报错信息反人类：一旦参数类型写错，编译器会抛出几百行涉及 tuple 和模板的“天书级”报错。
+     */
+
+    // 3. 使用 std::bind 绑定类的成员函数 (经典场景)
+    Button btn;
+    
+    // 注意：成员函数的绑定需要 取地址符 '&'，并且第二个参数必须是对象实例（或者是对象的指针）
+    std::function<void(int)> btn_click_y_only = std::bind(&Button::on_click, &btn, 100, std::placeholders::_1);
+    
+    // 实际调用的是 btn.on_click(100, 250)
+    btn_click_y_only(250); 
+
+
+    std::cout << "\n========== 附加：为什么 C++14 推荐用 Lambda 代替 bind ==========\n";
+
+    /*
+     * 【原理解析：为什么 Lambda 是全方位降维打击？】
+     * 1. 语言级特性：Lambda 是 C++ 的核心语法，而 bind 只是标准库的模板补丁。
+     * 2. 结构极简：编译器会为 Lambda 生成一个极简的匿名类，没有任何多余的 tuple 包装，几乎 100% 能被内联优化。
+     * 3. 捕获清晰：通过 [&btn] (引用捕获) 还是 [btn] (值拷贝) 一目了然，绝不会像 bind 那样在不知不觉中发生拷贝。
+     * 4. 完美避免堆分配：生成的对象足够小，能完美配合 std::function 的栈上小对象优化（SSO），实现零额外开销。
+     */
+
+    // 对比上面的 bind 成员函数，现代 C++ 的 Lambda 写法更直观，完全不需要 placeholders
+    // 只要把对象按引用 [&btn] 捕获进来即可
+    std::function<void(int)> lambda_click_y_only = [&btn](int y) {
+        btn.on_click(100, y); // 所见即所得，一目了然
+    };
+    
+    lambda_click_y_only(300);
+
+    return 0;
+}
+```
+
