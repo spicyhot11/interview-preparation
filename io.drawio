@@ -1,4 +1,4 @@
-<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.5.2 Chrome/142.0.7444.265 Electron/39.6.1 Safari/537.36" version="29.5.2" pages="9">
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.1 Chrome/142.0.7444.265 Electron/39.8.0 Safari/537.36" version="29.6.1" pages="9">
   <diagram name="三次握手" id="spr3XEOfmZqTkWsJ9hX5">
     <mxGraphModel dx="1042" dy="722" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
@@ -810,6 +810,9 @@
         </mxCell>
         <mxCell id="Og04L-qU4uiD3tpv2TAk-38" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="通用版本" vertex="1">
           <mxGeometry height="60" width="120" x="790" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="1N1piv_hwJhz5JogEkFy-1" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontStyle=1;fontColor=#FF0000;" value="条件模板、标签均在此处被视为一个新模板，参与签名生成与重载判断。（相较全特化的优势也体现在这里，优先级更高）" vertex="1">
+          <mxGeometry height="90" width="160" x="140" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
