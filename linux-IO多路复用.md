@@ -2674,7 +2674,7 @@ int main() {
 
 **消息驱动/Actor-like 少共享状态**
 
-## STL新版本引入
+## STL
 
 ### emplace 家族
 
@@ -2699,6 +2699,40 @@ int main() {
 ### vector
 
 不要用 vector\<bool\>, 这个做了特殊处理，不是按照数组存的  是位的存法
+
+### 仿函数
+
+| **容器名称**                     | **默认仿函数 (Template Parameter)** | **底层依赖的运算符重载** | **自定义方式**       |
+| -------------------------------- | ----------------------------------- | ------------------------ | -------------------- |
+| `std::set` / `std::multiset`     | `std::less<Key>`                    | `operator<`              | 传入自定义仿函数类型 |
+| `std::map` / `std::multimap`     | `std::less<Key>`                    | `operator<`              | 传入自定义仿函数类型 |
+| `std::priority_queue` (优先队列) | `std::less<T>`                      | `operator<`              | 传入自定义仿函数类型 |
+
+| **容器名称**                      | **默认哈希仿函数** | **默认相等仿函数**   | **底层依赖的运算符重载** |
+| --------------------------------- | ------------------ | -------------------- | ------------------------ |
+| `std::unordered_set` / `multiset` | `std::hash<Key>`   | `std::equal_to<Key>` | `operator==`             |
+| `std::unordered_map` / `multimap` | `std::hash<Key>`   | `std::equal_to<Key>` | `operator==`             |
+
+```c++
+#include <queue>
+#include <vector>
+
+struct MinHeapCompare {
+    bool operator()(int a, int b) const {
+        return a > b; // 在优先队列中，返回 true 表示 a 的优先级比 b 低（被排在后面）
+    }
+};
+
+int main() {
+    // 优先队列参数：元素类型, 容器类型, 仿函数类型
+    std::priority_queue<int, std::vector<int>, MinHeapCompare> pq;
+    pq.push(10);
+    pq.push(5);
+    pq.push(20);
+
+    // 此时 pq.top() 将会是 5
+}
+```
 
 
 
@@ -3191,30 +3225,30 @@ int main() {
 #include <iterator>
 #include <string>
 
+// 用于演示基类派生类判断的辅助结构体
+struct Base {};
+struct Derived : Base {};
+struct NotDerived {};
+
 // =========================================================================
 // 1. 标签分发 (Tag Dispatching)
 // =========================================================================
-// 标签分发是利用重载解析和类型标签（如 std::true_type 或迭代器标签）
-// 在编译期选择不同函数实现的技术。
-
-// --- 1.1 使用 std::true_type 和 std::false_type ---
+// (此部分纯 C++11 即可运行，无需修改)
 template <typename T>
 void print_is_integral_impl(T val, std::true_type) {
-    std::cout << val << " 是整数类型 (Integral)\n";
+    std::cout << val << " 是整数类型 (匹配 true_type 重载)\n";
 }
 
 template <typename T>
 void print_is_integral_impl(T val, std::false_type) {
-    std::cout << val << " 不是整数类型 (Non-integral)\n";
+    std::cout << val << " 不是整数类型 (匹配 false_type 重载)\n";
 }
 
 template <typename T>
 void print_is_integral(T val) {
-    // 实例化 std::is_integral<T> 并利用 {} 产生对象作为标签进行分发
     print_is_integral_impl(val, std::is_integral<T>{}); 
 }
 
-// --- 1.2 迭代器标签 (Iterator Tags) 分发 ---
 template <typename Iter>
 void custom_advance_impl(Iter& it, int n, std::random_access_iterator_tag) {
     std::cout << "使用随机访问迭代器加速移动\n";
@@ -3229,92 +3263,329 @@ void custom_advance_impl(Iter& it, int n, std::forward_iterator_tag) {
 
 template <typename Iter>
 void custom_advance(Iter& it, int n) {
-    // 使用 std::iterator_traits 获取迭代器类别（标签）
     custom_advance_impl(it, n, typename std::iterator_traits<Iter>::iterator_category{});
 }
 
 // =========================================================================
-// 2. 类型查询与判断 (Type Queries)
+// 2. 类型查询与判断 (Type Queries) - 包含“带壳”判断失败的陷阱
 // =========================================================================
+// (此处使用的是 C++11 的 ::value，如果在 C++17 中，可简写为 _v)
 void test_type_queries() {
-    std::cout << "\n--- 类型查询 ---\n";
+    std::cout << "\n--- 类型查询与陷阱 ---\n";
     
-    // C++11 风格：使用 ::value 获取布尔值
-    bool is_int = std::is_integral<int>::value;               // true
-    bool is_ptr = std::is_pointer<int*>::value;               // true
-    bool is_same = std::is_same<int, const int>::value;       // false (const int 与 int 不同)
-    bool is_base = std::is_base_of<std::true_type, std::is_integral<int>>::value; // true
+    bool is_same_1 = std::is_same<int, const int>::value;         // false
+    bool is_same_2 = std::is_same<int, int&>::value;              // false
+    std::cout << "is_same<int, const int>::value = " << is_same_1 << "\n";
 
-    // 注意：C++17 引入了 _v 变量模板 (例如 std::is_same_v)，但在 C++11/14 中仍需用 ::value
-    std::cout << "is_same<int, int>::value = " << std::is_same<int, int>::value << "\n";
+    bool is_base_1 = std::is_base_of<Base, Derived>::value;       // true 
+    bool is_base_2 = std::is_base_of<Base, const Derived>::value; // true 
+    bool is_base_3 = std::is_base_of<Base, Derived&>::value;      // false! 
+    std::cout << "is_base_of<Base, Derived&>::value = " << is_base_3 << " (陷阱！)\n";
 }
 
 // =========================================================================
-// 3. 类型修改与转换 (Type Modifiers) - C++11 vs C++14
+// 3. 类型修改、转换与“脱壳” (Type Modifiers & Peeling)
 // =========================================================================
-void test_type_modifiers() {
-    // 萃取操作常用于去除引用、const修饰符，或者退化类型
-    
-    // --- C++11 风格：使用 typename trait<T>::type ---
-    using Type1 = typename std::remove_reference<int&>::type;       // int
-    using Type2 = typename std::remove_const<const double>::type;   // double
-    
-    // --- C++14 风格：引入了 _t 别名模板，大大简化了书写 ---
-    using Type3 = std::remove_reference_t<int&&>;                   // int
-    using Type4 = std::remove_const_t<const float>;                 // float
-    using Type5 = std::remove_cv_t<const volatile int>;             // int (去除 const 和 volatile)
+template <typename T>
+struct remove_reference {
+    using type = T; // 1. 主模板：如果不是引用，直接返回 T
+};
 
-    // std::decay_t (C++14)：模拟传值时的类型退化（数组转指针，函数转指针，去引用和cv修饰）
-    using Type6 = std::decay_t<int[10]>;                            // int*
-    using Type7 = std::decay_t<void(&)(int)>;                       // void(*)(int)
+void test_type_modifiers() {
+    std::cout << "\n--- 类型脱壳演示 ---\n";
+
+    using HardShellType = const Derived&; 
+
+    // --- 方案 1：组合拳脱壳 - 先去引用，再去 cv ---
+    // 【C++11 方式】：需要使用 typename 和 ::type，嵌套起来非常长
+    using RawType1_CXX11 = typename std::remove_cv<
+                               typename std::remove_reference<HardShellType>::type
+                           >::type;
+                           
+    // 【C++14 方式】：使用 _t 别名后缀，去掉了繁琐的 typename 和 ::type
+    using RawType1_CXX14 = std::remove_cv_t<std::remove_reference_t<HardShellType>>;
+    
+    // --- 方案 2：终极脱壳神器 decay (退化) ---
+    // 【C++11 方式】
+    using RawType2_CXX11 = typename std::decay<HardShellType>::type;
+    
+    // 【C++14 方式】
+    using RawType2_CXX14 = std::decay_t<HardShellType>;
+
+    // 验证脱壳结果 (以 C++11 的脱壳结果为例)
+    bool is_base_peeled = std::is_base_of<Base, RawType2_CXX11>::value; 
+    std::cout << "脱壳后 is_base_of<Base, RawType2_CXX11>::value = " << is_base_peeled << " (成功！)\n";
 }
 
 // =========================================================================
 // 4. 条件编译与 SFINAE (Substitution Failure Is Not An Error)
 // =========================================================================
 
-// --- 4.1 std::conditional / std::conditional_t ---
-// 编译期的三元运算符：条件为true选第一个类型，false选第二个
-using MyType = std::conditional_t<true, int, std::string>; // MyType 为 int
+// 【C++11 方式】的三元运算
+using MyType_CXX11 = typename std::conditional<true, int, std::string>::type; 
+// 【C++14 方式】的三元运算
+using MyType_CXX14 = std::conditional_t<true, int, std::string>; 
 
-// --- 4.2 std::enable_if / std::enable_if_t (C++14) ---
-// SFINAE 核心工具：当条件不满足时，该模板会被忽略而不会导致编译报错
-
-// 版本A：仅当 T 是浮点数时启用
+// ================= 版本A：仅当 T 脱壳后 是浮点数时存活 =================
+// 【C++11 方式】：使用 typename std::enable_if<...>::type 以及 typename std::decay<...>::type
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, T> 
-process_number(T val) {
-    std::cout << val << " 是浮点数\n";
+typename std::enable_if<
+    std::is_floating_point<typename std::decay<T>::type>::value, 
+    typename std::decay<T>::type
+>::type 
+process_number(T&& val) {
+    std::cout << val << " 是浮点数 (C++11 方式脱壳处理)\n";
     return val * 2.5;
 }
 
-// 版本B：仅当 T 是整数类型时启用 (配合非类型模板参数的写法)
-template <typename T, typename = std::enable_if_t<std::is_integral<T>::value>>
-void process_number(T val) {
-    std::cout << val << " 是整数\n";
+/* // 【C++14 方式】：对比上面的 C++11，代码显著精简
+template <typename T>
+std::enable_if_t<std::is_floating_point<std::decay_t<T>>::value, std::decay_t<T>> 
+process_number(T&& val) {
+    std::cout << val << " 是浮点数 (C++14 方式脱壳处理)\n";
+    return val * 2.5;
 }
+*/
+
+// ================= 版本B：仅当 T 脱壳后 是整数类型时存活 =================
+// 【C++11 方式】：作为模板默认参数使用 enable_if
+template <typename T, 
+          typename = typename std::enable_if<
+              std::is_integral<typename std::decay<T>::type>::value
+          >::type>
+void process_number(T&& val) {
+    std::cout << val << " 是整数 (C++11 方式脱壳处理)\n";
+}
+
+/*
+// 【C++14 方式】：
+template <typename T, typename = std::enable_if_t<std::is_integral<std::decay_t<T>>::value>>
+void process_number(T&& val) {
+    std::cout << val << " 是整数 (C++14 方式脱壳处理)\n";
+}
+*/
+
+// =========================================================================
+// 5. 萃取工具的底层实现原理 (C++11 及之前就已经确立的机制)
+// =========================================================================
+namespace my_std {
+
+    template <typename T> 
+    struct is_floating_point : std::false_type {}; 
+
+    template <> struct is_floating_point<float>       : std::true_type {};
+    template <> struct is_floating_point<double>      : std::true_type {};
+    template <> struct is_floating_point<long double> : std::true_type {};
+
+    template <typename B, typename D>
+    struct is_base_of {
+    private:
+        typedef char yes[1];
+        typedef char no[2];
+
+        static yes& test(B*);
+        static no& test(...);
+
+    public:
+        // C++11 的 constexpr 支持在这里非常关键
+        static constexpr bool value = sizeof(test(static_cast<D*>(nullptr))) == sizeof(yes);
+    };
+
+} // namespace my_std
 
 // =========================================================================
 // 主函数测试
 // =========================================================================
 int main() {
-    // 测试标签分发
-    print_is_integral(42);       // 匹配 std::true_type
-    print_is_integral(3.14);     // 匹配 std::false_type
+    print_is_integral(42);       
+    print_is_integral(3.14);     
 
-    // 测试迭代器标签分发
     std::vector<int> vec = {1, 2, 3, 4, 5};
     auto it = vec.begin();
-    custom_advance(it, 2);       // Vector 迭代器是 Random Access
-    std::cout << "移动后的值: " << *it << "\n";
+    custom_advance(it, 2);       
 
-    // 测试类型查询
     test_type_queries();
+    test_type_modifiers();
 
-    // 测试 SFINAE
-    std::cout << "\n--- SFINAE 测试 ---\n";
-    process_number(5);           // 路由到整数版本
-    process_number(5.5f);        // 路由到浮点数版本
+    std::cout << "\n--- SFINAE (配合万能引用脱壳) 测试 ---\n";
+    int a = 5;
+    const float b = 5.5f;
+    // 这里会调用 C++11 方式定义的函数重载
+    process_number(a);           
+    process_number(b);           
+
+    std::cout << "\n--- 底层实现原理 (my_std) 测试 ---\n";
+    std::cout << "my_std::is_floating_point<double>::value = " 
+              << my_std::is_floating_point<double>::value << "\n";
+    std::cout << "my_std::is_floating_point<int>::value = " 
+              << my_std::is_floating_point<int>::value << "\n";
+              
+    std::cout << "my_std::is_base_of<Base, Derived>::value = " 
+              << my_std::is_base_of<Base, Derived>::value << "\n";
+    std::cout << "my_std::is_base_of<Base, NotDerived>::value = " 
+              << my_std::is_base_of<Base, NotDerived>::value << "\n";
+
+    return 0;
+}
+```
+
+#### 与宏结合 分发标签
+
+```c++
+#include <iostream>
+#include <type_traits>
+#include <vector>
+#include <iterator>
+#include <string>
+
+// =========================================================================
+// 【系统架构宏探测区】(供跨平台演示使用)
+// =========================================================================
+#if defined(_WIN32)
+    struct os_windows_tag {};
+    using current_os_tag = os_windows_tag;
+    constexpr bool is_windows = true;
+    constexpr bool is_linux = false;
+#elif defined(__linux__)
+    struct os_linux_tag {};
+    using current_os_tag = os_linux_tag;
+    constexpr bool is_windows = false;
+    constexpr bool is_linux = true;
+#else
+    struct os_unknown_tag {};
+    using current_os_tag = os_unknown_tag;
+    constexpr bool is_windows = false;
+    constexpr bool is_linux = false;
+#endif
+
+// 辅助结构体
+struct Base {};
+struct Derived : Base {};
+
+
+// =========================================================================
+// 1. 标签分发 (Tag Dispatching) - C++11/14 经典跨平台/重载手法
+// =========================================================================
+void init_network_impl(os_windows_tag) { std::cout << "-> C++11/14 标签分发: Windows 网络初始化\n"; }
+void init_network_impl(os_linux_tag)   { std::cout << "-> C++11/14 标签分发: Linux 网络初始化\n"; }
+void init_network_impl(os_unknown_tag) { std::cout << "-> C++11/14 标签分发: 通用 网络初始化\n"; }
+
+void init_network_cpp11() {
+    init_network_impl(current_os_tag{}); 
+}
+
+
+// =========================================================================
+// 2. 类型查询与陷阱 (C++11 ::value vs C++17 _v)
+// =========================================================================
+void test_type_queries() {
+    std::cout << "\n--- 类型查询 ---\n";
+    
+    // C++11 风格
+    bool is_same_11 = std::is_same<int, const int>::value;   // false (带壳判断失败)
+    
+    // C++17 风格：_v 后缀直接返回值，代码更清爽
+    bool is_same_17 = std::is_same_v<int, const int>;        // false 
+    bool is_base_17 = std::is_base_of_v<Base, Derived>;      // true
+}
+
+
+// =========================================================================
+// 3. 类型脱壳 (C++14 _t 与 decay_t)
+// =========================================================================
+void test_type_modifiers() {
+    using HardShellType = const Derived&;
+
+    // C++14 std::decay_t 终极脱壳 (去引用、去cv、数组退化指针)
+    using RawType = std::decay_t<HardShellType>;
+
+    // C++17 配合脱壳使用：
+    bool is_base_peeled = std::is_base_of_v<Base, RawType>; // true!
+}
+
+
+// =========================================================================
+// 4. SFINAE vs C++17 if constexpr (同一功能的跨时代对比)
+// =========================================================================
+
+// --- 4.1 C++11/14 风格：使用 SFINAE (enable_if) 切割函数 ---
+// 必须写两个同名模板函数，利用替换失败机制淘汰不匹配的重载
+template <typename T>
+std::enable_if_t<std::is_floating_point<std::decay_t<T>>::value, std::decay_t<T>> 
+process_number_cpp11(T&& val) {
+    std::cout << val << " 是浮点数 (C++11 SFINAE 实现)\n";
+    return val * 2.5;
+}
+
+template <typename T, typename = std::enable_if_t<std::is_integral<std::decay_t<T>>::value>>
+void process_number_cpp11(T&& val) {
+    std::cout << val << " 是整数 (C++11 SFINAE 实现)\n";
+}
+
+// --- 4.2 C++17 风格：使用 if constexpr 降维打击 ---
+// 只需要写一个函数！编译器在编译期计算条件，直接把 false 的分支代码“删掉”。
+// 这意味着你不用去写繁琐的 enable_if 重载了。
+template <typename T>
+auto process_number_cpp17(T&& val) { // C++14 引入的 auto 返回值推导
+    using RawType = std::decay_t<T>;
+    
+    // 注意这里的 constexpr 关键字极其关键！
+    if constexpr (std::is_floating_point_v<RawType>) {
+        std::cout << val << " 是浮点数 (C++17 if constexpr 实现)\n";
+        return val * 2.5;
+    } 
+    else if constexpr (std::is_integral_v<RawType>) {
+        std::cout << val << " 是整数 (C++17 if constexpr 实现)\n";
+        return val;
+    } 
+    else {
+        // 如果上面都不满足，编译器连这个分支里的代码都不会去生成
+        static_assert(AlwaysFalse<T>::value, "不支持的类型！"); // 高级技巧：编译期报错拦截
+    }
+}
+
+
+// =========================================================================
+// 5. 跨平台架构选择 (C++17 if constexpr 替代 标签分发)
+// =========================================================================
+void init_network_cpp17() {
+    std::cout << "\n--- C++17 跨平台架构选择 ---\n";
+    // 告别标签对象和重载！直接在函数内部用 if constexpr 进行编译期路由。
+    // 如果 is_windows 是 true，Linux 的分支在编译后根本不存在于二进制文件中。
+    if constexpr (is_windows) {
+        std::cout << "-> 执行 Windows 网络初始化 (直白如白话)\n";
+    } else if constexpr (is_linux) {
+        std::cout << "-> 执行 Linux 网络初始化 (直白如白话)\n";
+    } else {
+        std::cout << "-> 执行 通用 网络初始化 (直白如白话)\n";
+    }
+}
+
+
+// =========================================================================
+// 主函数测试
+// =========================================================================
+int main() {
+    // 1. 跨平台测试
+    init_network_cpp11();
+    init_network_cpp17();
+
+    // 2. 基础查询与脱壳
+    test_type_queries();
+    test_type_modifiers();
+
+    // 3. 模板类型推导分支处理测试
+    std::cout << "\n--- SFINAE vs C++17 分支测试 ---\n";
+    int a = 5;
+    const float b = 5.5f;
+    
+    // C++11 调用
+    process_number_cpp11(a);           
+    process_number_cpp11(b);           
+
+    // C++17 调用 (不仅代码少，行为完全一致)
+    process_number_cpp17(a);
+    process_number_cpp17(b);
 
     return 0;
 }
@@ -3322,3 +3593,818 @@ int main() {
 
 
 
+## 可调用对象
+
+### 可调用对象
+
+可调用对象在C++11/14中分为
+
+1.  函数指针
+2. 仿函数
+3. function
+4. lambda
+
+### function与bind
+
+```c++
+#include <iostream>
+#include <functional>
+#include <string>
+
+// --- 准备一些测试用的函数和类 ---
+
+// 1. 普通函数：需要两个参数
+void print_user_info(int id, const std::string& name) {
+    std::cout << "[普通函数] User ID: " << id << ", Name: " << name << std::endl;
+}
+
+// 2. 一个带成员函数的类
+class Button {
+public:
+    // 成员函数：隐式包含第一个参数 'this' 指针
+    void on_click(int x, int y) {
+        std::cout << "[成员函数] Button clicked at (" << x << ", " << y << ")" << std::endl;
+    }
+};
+
+
+int main() {
+    std::cout << "========== 第一部分：std::function 常见说明与原理 ==========\n";
+    
+    /*
+     * 【原理解析：std::function 底层是怎么工作的？】
+     * 1. 类型擦除 (Type Erasure)：这是它的核心魔法。不管你塞进去的是普通函数、
+     * Lambda 还是复杂的仿函数类，它都会通过内部的“多态（虚函数或函数指针表）”
+     * 把它们真实的类型“擦除”掉，只对外暴露统一的调用签名。
+     * 2. 小对象优化 (SSO, Small Object Optimization)：为了性能，它内部有一小块固定内存
+     * （通常是 16~32 字节）。如果你装入的 Lambda 捕获的变量很少，它就直接存在这块栈内存里。
+     * 如果捕获的变量太多，超出了这个大小，它就会默默地去堆上申请内存（调用 new）。
+     */
+
+    /*
+     * 【std::function 的优点】
+     * 1. 终极统一：彻底解决了 C++11 之前函数指针、仿函数等类型乱飞的问题。
+     * 2. 极佳的解耦利器：完美适配回调函数（Callback）、事件驱动和任务队列（如线程池）的设计。
+     * * 【std::function 的缺点与隐形开销】
+     * 1. 虚函数开销与反内联：由于底层基于类型擦除机制，通过它调用函数会产生类似虚函数调用的开销，
+     * 并阻碍编译器的 Inline 优化。在极致的性能热点（如每秒调用千万次的算术循环）中应慎用。
+     * 2. 堆分配陷阱：一旦装入的可调用对象过大（超过 SSO 阈值），就会触发 new/delete，带来明显的性能毛刺。
+     * 3. 异常风险：如果是空的 function 对象，直接调用会导致程序抛出 std::bad_function_call 崩溃。
+     */
+
+    // 1. std::function 作为通用包装器
+    // 语法：std::function<返回值(参数1, 参数2)>
+    std::function<void(int, std::string)> func_wrapper;
+
+    // 安全调用规范：调用前最好判空（类似检查空指针）
+    if (!func_wrapper) {
+        std::cout << "func_wrapper 目前为空，不能调用！\n";
+    }
+
+    // 它可以装入普通函数
+    func_wrapper = print_user_info;
+    func_wrapper(1, "Alice");
+
+    // 它也可以装入 Lambda 表达式（现代 C++ 最常用的方式）
+    func_wrapper = [](int id, std::string name) {
+        std::cout << "[Lambda] Custom Print - ID: " << id << ", Name: " << name << std::endl;
+    };
+    func_wrapper(2, "Bob");
+
+
+    std::cout << "\n========== 第二部分：std::bind 使用说明 (压缩参数) ==========\n";
+
+    /*
+     * 【原理解析：std::bind 底层做了什么？】
+     * std::bind 本质上是一个模板工厂函数。当你调用它时，编译器在底层为你动态生成了一个
+     * 隐藏的“仿函数（Functor）”类。
+     * 这个类内部使用 std::tuple 偷偷保存了你传给它的所有绑定的参数（比如下面的 99）。
+     * 递归解包，把值逐步替换到原函数的参数tuple，然后传给那个函数
+     * 当你最终调用它时，它把存好的 99 和传进来的占位符参数拼在一起，再去调用原函数。
+     * 占位符还是定义好的.... 意味着他不是无限延申
+     */
+
+    // 需求：假如我们现在只需要打印 ID 为 99 的用户，想把第一个参数“定死”
+    // 使用 std::placeholders::_1 作为保留给未来的第一个参数的位置
+    // 按顺序放的  99放到print_user_info 第一个参数
+    // std::placeholders::_1代表把bind_name_only的第一个参数放到print_user_info第二个参数
+    std::function<void(std::string)> bind_name_only = std::bind(print_user_info, 99, std::placeholders::_1);
+    
+    // 现在调用只需要传一个参数了，99 已经被“压缩”进去了
+    bind_name_only("Charlie"); 
+
+
+    /*
+     * 【std::bind 的隐形开销与缺点】
+     * 1. 默认值拷贝开销：bind 默认对绑定的参数进行“按值拷贝”。如果绑定大对象，会引发严重的性能退化（除非显式用 std::ref）。
+     * 2. 阻碍内联优化：由于底层被 std::tuple 和复杂的模板推导包裹，编译器很难对其进行 Inline（内联）优化。
+     * 3. 堆内存分配陷阱：由于生成的包装类往往比较臃肿，很容易突破 std::function 内部的“小对象优化(SSO)”限制，
+     * 导致其被迫在堆上动态分配内存（调用 new），严重影响极端性能。
+     * 4. 报错信息反人类：一旦参数类型写错，编译器会抛出几百行涉及 tuple 和模板的“天书级”报错。
+     */
+
+    // 3. 使用 std::bind 绑定类的成员函数 (经典场景)
+    Button btn;
+    
+    // 注意：成员函数的绑定需要 取地址符 '&'，并且第二个参数必须是对象实例（或者是对象的指针）
+    std::function<void(int)> btn_click_y_only = std::bind(&Button::on_click, &btn, 100, std::placeholders::_1);
+    
+    // 实际调用的是 btn.on_click(100, 250)
+    btn_click_y_only(250); 
+
+
+    std::cout << "\n========== 附加：为什么 C++14 推荐用 Lambda 代替 bind ==========\n";
+
+    /*
+     * 【原理解析：为什么 Lambda 是全方位降维打击？】
+     * 1. 语言级特性：Lambda 是 C++ 的核心语法，而 bind 只是标准库的模板补丁。
+     * 2. 结构极简：编译器会为 Lambda 生成一个极简的匿名类，没有任何多余的 tuple 包装，几乎 100% 能被内联优化。
+     * 3. 捕获清晰：通过 [&btn] (引用捕获) 还是 [btn] (值拷贝) 一目了然，绝不会像 bind 那样在不知不觉中发生拷贝。
+     * 4. 完美避免堆分配：生成的对象足够小，能完美配合 std::function 的栈上小对象优化（SSO），实现零额外开销。
+     */
+
+    // 对比上面的 bind 成员函数，现代 C++ 的 Lambda 写法更直观，完全不需要 placeholders
+    // 只要把对象按引用 [&btn] 捕获进来即可
+    std::function<void(int)> lambda_click_y_only = [&btn](int y) {
+        btn.on_click(100, y); // 所见即所得，一目了然
+    };
+    
+    lambda_click_y_only(300);
+
+    return 0;
+}
+```
+
+
+
+### lambda
+
+> 通过编译器生成一个匿名类，将外部要捕获的值作为成员变量存放。重载了（）用于直接调用函数。
+>
+> C++14 引入的泛型 Lambda，是借助类模板的方式完成
+
+#### 基本语法
+
+```c++
+[capture](parameters) mutable -> return_type { body }
+```
+
+| **组成部分**  | **名称**                      | **作用**                                                     |
+| ------------- | ----------------------------- | ------------------------------------------------------------ |
+| **`[]`**      | **捕获列表 (Capture Clause)** | 定义 Lambda 可以访问外部作用域中的哪些变量，以及是以**值**还是**引用**方式访问。 |
+| **`()`**      | **参数列表 (Parameter List)** | 与普通函数一致。如果不需要参数，在 C++11 中可以省略。        |
+| **`mutable`** | **说明符 (Optional)**         | 默认情况下，按值捕获的变量在 Lambda 内部是 `const` 的。加上它就可以修改这些副本。 |
+| **`-> type`** | **返回类型 (Return Type)**    | 尾置返回类型。大多数情况下编译器能自动推导，可以省略。       |
+| **`{}`**      | **函数体 (Function Body)**    | 执行的具体逻辑。                                             |
+
+```c++
+#include <iostream>
+#include <memory>
+#include <string>
+
+class LambdaCheatSheet {
+    int member_var = 10;
+
+public:
+    void demonstrate() {
+        int x = 10;
+        int y = 20;
+
+        // ==========================================
+        // 1. 最简形式与标准语法 (C++11)
+        // 完整语法: [capture](params) mutable -> return_type { body }
+        // ==========================================
+        
+        // 简写：没有参数和返回类型时，() 和 -> void 都可以省略
+        auto basic = []{ std::cout << "Hello Lambda!\n"; };
+        basic(); 
+
+        // 带有尾置返回类型（当内部逻辑复杂，编译器无法自动推导时使用）
+        auto explicit_ret = [](double d) -> int { 
+            return static_cast<int>(d); 
+        };
+        // 也可以直接调用  无需先拿变量
+        auto ret = [](double d) -> int { 
+            return static_cast<int>(d); 
+        }(123.123);
+
+        // ==========================================
+        // 2. 基础捕获：值与引用 (C++11)
+        // ==========================================
+        
+        // [x, y] : 按值捕获。内部使用的是 x 和 y 的只读副本
+        auto cap_val = [x, y]() { return x + y; };
+        
+        // [&x, &y] : 按引用捕获。内部可以直接修改外部的 x 和 y
+        auto cap_ref = [&x, &y]() { x++; y++; };
+
+        // ==========================================
+        // 3. 隐式/全局捕获 (C++11) —— ⚠️ 实际工程中建议慎用
+        // ==========================================
+        
+        // [=] : 按值捕获外部作用域所有可见的局部变量
+        auto cap_all_val = [=]() { return x + y; };
+        
+        // [&] : 按引用捕获外部作用域所有可见的局部变量
+        auto cap_all_ref = [&]() { x += 10; };
+
+        // ==========================================
+        // 4. 捕获类成员 (C++11)
+        // ==========================================
+        
+        // [this] : 捕获当前对象的指针，从而读写类的成员变量
+        auto cap_this = [this]() { 
+            this->member_var += 100; // 等价于直接写 member_var += 100
+        };
+
+        // ==========================================
+        // 5. mutable 关键字 (C++11)
+        // ==========================================
+        
+        // 默认按值捕获的变量在内部是 const 的。
+        // 加了 mutable，就可以在 Lambda 内部修改这些副本（不影响外部实参）
+        auto mut_lambda = [x]() mutable {
+            x += 5; // 合法：修改的是存在闭包对象里的 x 副本
+            return x;
+        };
+
+        // ==========================================
+        // 6. 泛型 Lambda (⭐ C++14 核心特性)
+        // ==========================================
+        
+        // 参数类型使用 auto，相当于底层生成了模板 operator()
+        auto generic_lambda = [](auto a, auto b) {
+            return a + b; 
+        };
+        // 同一个 Lambda 可以处理不同类型
+        generic_lambda(5, 10);           // 实例化为 int
+        generic_lambda(3.14, 2.71);      // 实例化为 double
+        generic_lambda(std::string("A"), std::string("B")); // 实例化为 string
+
+        // ==========================================
+        // 7. 初始化捕获 / 广义捕获 (⭐ C++14 核心特性)
+        // ==========================================
+        
+        // 场景 A：重命名或在捕获时进行计算
+        auto init_cap = [z = x + y, str = std::string("Test")]() { 
+            std::cout << str << ": " << z << "\n"; 
+        };
+
+        // 场景 B：移动捕获（解决 unique_ptr 等不可拷贝对象传入 Lambda 的问题）
+        auto ptr = std::make_unique<int>(42);
+        
+        // 将外部的 ptr 移动给内部新建的变量 p，彻底接管所有权
+        auto move_cap = [p = std::move(ptr)]() {
+            std::cout << "Unique value: " << *p << "\n";
+        };
+        
+        // 运行到这里时，外部的 ptr 已经是 nullptr 了
+        move_cap(); 
+    }
+};
+```
+
+### 函数指针
+
+```c++
+int (*func_ptr)(int, int);  // 指针声明
+
+typedef  int  (*MathFunc)  (int, int);
+   |      |        |           |
+   |      |        |           +---> 3. 参数列表：这个函数接收两个 int 类型的参数
+   |      |        |
+   |      |        +---------------> 2. 核心定义：* 代表指针，MathFunc 是我们定义出的【新类型名称】
+   |      |
+   |      +------------------------> 4. 返回值：这个函数返回一个 int 类型的值
+   |
+   +-------------------------------> 1. 关键字：告诉编译器，我们不是在声明变量，而是在给类型起别名
+```
+
+### 仿函数
+
+```c++
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+// ==========================================
+// 1. 仿函数的基本语法
+// ==========================================
+class FunctorName {
+public:
+    // 重载 () 运算符
+    // 返回类型 operator()(参数列表) { ... }
+    void operator()(int param) {
+        // 执行的操作
+    }
+};
+
+// ==========================================
+// 2. 仿函数的实际示例：一个带有内部状态的加法器
+// ==========================================
+class Adder {
+private:
+    int base_value; // 仿函数可以拥有内部状态，这是它比普通函数强大的地方
+
+public:
+    // 构造函数：初始化状态
+    Adder(int val) : base_value(val) {}
+
+    // 重载 () 运算符
+    int operator()(int x) const {
+        return base_value + x;
+    }
+};
+
+int main() {
+    // --- 示例 A：基本调用 ---
+    // 创建一个仿函数对象，初始化 base_value 为 10
+    Adder addTen(10); 
+    
+    // 像调用普通函数一样使用对象：addTen(5) 实际上调用了 addTen.operator()(5)
+    std::cout << "10 + 5 = " << addTen(5) << std::endl;   // 输出: 15
+    std::cout << "10 + 20 = " << addTen(20) << std::endl; // 输出: 30
+
+
+    // --- 示例 B：结合 STL 算法使用 ---
+    std::vector<int> numbers = {1, 2, 3, 4, 5};
+    std::cout << "处理前: ";
+    for(int n : numbers) std::cout << n << " ";
+    std::cout << "\n";
+
+    // 将 vector 中的每个元素加上 100
+    // 传入一个临时对象 Adder(100) 作为自定义操作
+    std::transform(numbers.begin(), numbers.end(), numbers.begin(), Adder(100));
+
+    std::cout << "处理后: ";
+    for(int n : numbers) std::cout << n << " "; // 输出: 101 102 103 104 105
+    std::cout << "\n";
+
+    return 0;
+}
+```
+
+
+
+
+
+## 类
+
+### C++ 与操作系统内存模式
+
+- C++ 指针在32位系统下是4B    64位系统下是8B  
+- 他们用于标识地址， 每个地址对应1B的空间
+- 32位下最多标识2^32个地址   也就是内存最多只能用到4GB
+
+### 内存对齐
+
+```c++
+/*
+ * ==========================================
+ * C++ 内存对齐规则与示例 (Memory Alignment)
+ * ==========================================
+ *
+ * 核心对齐规则（三大定律）：
+ * * 1. 【成员偏移量规则】
+ * 每个成员变量的起始地址（相对于结构体起始地址的偏移量 Offset），必须是该成员本身大小的整数倍。
+ * （比如：int 占 4 字节，它的偏移量只能是 0, 4, 8... 否则编译器会在前面塞入 Padding 补齐）
+ * * 2. 【总体大小规则】
+ * 类或结构体的总大小（sizeof），必须是其内部“最宽基本数据类型”大小的整数倍。
+ * （比如：类里面有 char, int, double，最宽的是 double 占 8 字节，那么结构体总大小必须是 8 的倍数）
+ * * 3. 【包含子结构体规则】
+ * 如果成员包含了另一个结构体，那么该子结构体的起始偏移量，必须是其内部“最宽基本类型”的整数倍。
+ * * 4. 数组被看作是连续放了该类型的变量若干个
+ * （注：以下示例默认在 64 位环境下，char=1, int=4, double=8）
+ * * 5. 存在虚函数的，会额外多维护一个虚函数指针（64位：8   32位：4 ）
+ * * 6. 对齐是对于基础变量而言的，即便你嵌套数据结构、数组，也是按照内部的基础变量来进行对齐
+ */
+
+/*
+* 对内存数据是按 Cache Line（在主流 Intel/AMD CPU 上固定为 64 字节）为单位加载到缓存里的。这种时候，为了能够让一次读取正好读满一个结构体/数组，会考虑按照64 /32 大小去提高性能
+* 内存分页与对齐 (Memory Page)也是一个原因，当你处理极大规模的数据（比如几百 GB 的数据库索引）时，你会希望数据的分布能和 4KB（4096） 或者更大的 大页（Huge Pages） 对齐。
+*/
+
+#include <iostream>
+
+// ---------------------------------------------------------
+// 示例 1：糟糕的布局（无视对齐规则，空间浪费严重）
+// ---------------------------------------------------------
+struct BadLayout {
+    char a;     // [偏移量 0] 占用 1 字节。
+                // [偏移量 1-7] 填充 7 字节 Padding。因为下一个成员 double 要求起始地址是 8 的倍数。
+    double b;   // [偏移量 8] 占用 8 字节 (覆盖 8-15)。
+    int c;      // [偏移量 16] 占用 4 字节 (覆盖 16-19)。16 是 4 的倍数，没问题。
+                // [偏移量 20-23] 末尾填充 4 字节 Padding。
+                // 解释：当前真实数据占到 19，总大小算作 20。但根据【规则2】，
+                // 最宽成员是 double(8)，总大小必须是 8 的倍数，所以必须补齐到 24。
+}; // sizeof(BadLayout) == 24
+
+
+// ---------------------------------------------------------
+// 示例 2：优秀的布局（按占用从大到小排列，极致利用空间）
+// ---------------------------------------------------------
+struct GoodLayout {
+    double b;   // [偏移量 0] 占用 8 字节 (覆盖 0-7)。
+    int c;      // [偏移量 8] 占用 4 字节 (覆盖 8-11)。8 是 4 的倍数，完美。
+    char a;     // [偏移量 12] 占用 1 字节 (覆盖 12)。12 是 1 的倍数，完美。
+                // [偏移量 13-15] 末尾填充 3 字节 Padding。
+                // 解释：当前跑到 13，最宽成员 double(8)，为了凑够 8 的倍数，补齐到 16。
+}; // sizeof(GoodLayout) == 16
+
+
+// ---------------------------------------------------------
+// 示例 3：#pragma pack 强制改变对齐规则
+// ---------------------------------------------------------
+#pragma pack(push, 1) // 告诉编译器：不要管倍数了，所有对齐要求统统设为 1 字节！
+struct PackedLayout {
+    char a;     // [偏移量 0] 占用 1 字节
+    double b;   // [偏移量 1] 占用 8 字节
+    int c;      // [偏移量 9] 占用 4 字节
+}; // sizeof(PackedLayout) == 13 （没有任何空间浪费，紧紧挨着。但 CPU 读取性能极差！）
+#pragma pack(pop)     // 恢复系统默认的对齐设置
+
+
+int main() {
+    std::cout << "BadLayout sizeof:  " << sizeof(BadLayout) << " bytes\n";
+    std::cout << "GoodLayout sizeof: " << sizeof(GoodLayout) << " bytes\n";
+    std::cout << "PackedLayout sizeof: " << sizeof(PackedLayout) << " bytes\n";
+    
+    return 0;
+}
+```
+
+
+
+### 虚函数
+
+#### 虚函数表
+
+1. 当每个类中出现virtual的时候，编译器就会自动生成虚函数指针   用来访问只读数据区内的虚函数表
+2. 当继承发生的时候，对于继承的类  会从父类拷贝一份虚函数表。如果子类对父类虚函数有重写时  则会**替换**子类虚函数表中父函数所在位置。如果是增加虚函数  则会在虚函数表后面**追加**
+3. 子类对父类的调用  如果是通过**父类:: 或者using暴露的方式**，意味着在编译器会直接对应函数地址放进来。**不涉及虚函数表**
+4. 编译期会 决定这个函数的匹配（直接地址/虚函数），运行时 才会实际去查表
+5. 多重继承时，子类会为每一个父类生成虚函数表以及虚函数指针。 发生覆写时  两者均会发生覆写
+
+#### 隐藏与覆写区别
+
+|                  | 隐藏                                                         | 覆写                                                         |
+| ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 作用             | 子类继承父类的时候，只要同名函数（签名可不同）或者未声明未虚函数 | 子类与父类函数签名完全一致（仅允许**返回基类/子类的指针或引用**可以不一致），且父类声明为虚函数。（可不打上覆写标识，但是建议打上） |
+| 范围             | 编译期主动填入函数地址  直接遮挡掉父类的函数                 | 运行时动态查找虚函数表                                       |
+| 是否两者可以共存 | 可以                                                         | 可以。走哪个的路径取决于是否运行时查表                       |
+| 标识             | 无需                                                         | 建议显式注明 override                                        |
+
+
+
+| **调用形式**  | **绑定方式** | **是否查虚表** | **性能**           |
+| ------------- | ------------ | -------------- | ------------------ |
+| `obj.func()`  | 静态绑定     | **否**         | 极高（可内联）     |
+| `ptr->func()` | 动态绑定     | **是**         | 一般（有跳转开销） |
+| `ref.func()`  | 动态绑定     | **是**         | 一般               |
+
+#### 构造函数时，不允许调用虚函数
+
+因为构造函数执行时  v_ptr=父类 -》执行构造函数逻辑 -》 v_ptr=子类
+
+### 纯虚函数
+
+```c++
+#include <iostream>
+#include <string>
+
+// ==========================================
+// 1. 纯接口 (Pure Interface) 的业界最佳实践
+// 潜规则：以 'I' 开头，无成员变量，全纯虚函数
+// ==========================================
+struct ILogger {
+    // 现代 C++ 推荐写法：虚析构函数直接 = default
+    // 保证通过接口指针 delete 时能正确调用子类析构，且免去类外写空实现的麻烦
+    virtual ~ILogger() = default; 
+    
+    // 纯虚函数：定义契约，强制子类实现（虚表槽位此时填入的是报错函数）
+    virtual void log(const std::string& msg) = 0; 
+};
+
+// ==========================================
+// 2. 带状态的抽象类 (Abstract Class)
+// 只要类里有未实现的纯虚函数，就是抽象类，严禁实例化
+// ==========================================
+class BaseHandler : public ILogger {
+protected:
+    int state; // 抽象类可以有具体的成员变量
+
+public:
+    BaseHandler() : state(0) {}
+    
+    // 致命陷阱：即使是纯虚析构函数，也【必须】有实现体！
+    // 否则 delete 子类时，链接器会报 undefined reference 错误。
+    virtual ~BaseHandler() = 0; 
+
+    // 注意：继承自 ILogger 的 log() 依然是纯虚的，这里选择不实现
+    
+    // 冷知识：纯虚函数其实可以有默认实现（但必须写在类外）
+    virtual void commonStep() = 0; 
+};
+
+// 为纯虚析构提供必不可少的实现体（用来清理抽象类的状态）
+BaseHandler::~BaseHandler() {
+    std::cout << "BaseHandler: 清理抽象类的状态..." << "\n";
+}
+
+// 为纯虚函数提供默认实现
+void BaseHandler::commonStep() {
+    std::cout << "BaseHandler: 提供默认的处理步骤..." << "\n";
+}
+
+// ==========================================
+// 3. 具体实现类 (Concrete Class)
+// 必须“还清”所有祖先的纯虚函数债务，否则自己也是抽象类
+// ==========================================
+class FileLogger : public BaseHandler {
+public:
+    // 必须覆写！用 override 让编译器帮忙检查签名
+    void log(const std::string& msg) override {
+        std::cout << "FileLogger 写入日志: " << msg << "\n";
+    }
+
+    void commonStep() override {
+        BaseHandler::commonStep(); // 子类可以显式调用父类提供的“纯虚函数默认代码”
+        std::cout << "FileLogger: 执行子类特有的额外步骤..." << "\n";
+    }
+    
+    ~FileLogger() override {
+        std::cout << "FileLogger: 销毁子类对象..." << "\n";
+    }
+};
+
+// ==========================================
+// 4. 使用场景
+// ==========================================
+int main() {
+    // ILogger logger;             // ❌ 报错：不能实例化接口
+    // BaseHandler handler;        // ❌ 报错：不能实例化抽象类
+    
+    // ✅ 正确用法：用接口指针 / 抽象类指针 指向 具体子类对象
+    ILogger* logger = new FileLogger();
+    
+    std::cout << "--- 业务执行 ---" << "\n";
+    logger->log("系统启动成功"); 
+    
+    // 如果把 logger 强转为 BaseHandler*，就可以调用 commonStep()
+    if (auto* handler = dynamic_cast<BaseHandler*>(logger)) {
+        handler->commonStep();
+    }
+    
+    std::cout << "\n--- 对象销毁 ---" << "\n";
+    // delete 时，完美触发多态析构链路：
+    // ~FileLogger() -> ~BaseHandler() -> ~ILogger()
+    delete logger; 
+
+    return 0;
+}
+```
+
+### 继承、多态、分装
+
+#### 公有、私有、保护继承
+
+```c++
+#include <iostream>
+
+// ================= 基类 =================
+class Base {
+public:
+    int pub;    // 公有：任何地方都能访问
+protected:
+    int prot;   // 受保护：只有本类和子类内部可以访问
+private:
+    int priv;   // 私有：只有本类内部可以访问，子类也看不到
+};
+
+
+// ================= 1. 公有继承 (Public) =================
+// 特点：接口原样继承。最常用，表示 "is-a"（是一个）关系。
+class PublicDerived : public Base {
+public:
+    void accessTest() {
+        pub = 1;    // ✅ 依然是 public
+        prot = 2;   // ✅ 依然是 protected
+        // priv = 3; // ❌ 编译报错：基类的 private 成员对子类永远不可见
+    }
+};
+
+
+// ================= 2. 保护继承 (Protected) =================
+// 特点：基类的 public 成员在子类中被“降级”为 protected。
+class ProtectedDerived : protected Base {
+public:
+    void accessTest() {
+        pub = 1;    // ✅ 变成了 protected（只能在子类及其派生类内部访问）
+        prot = 2;   // ✅ 依然是 protected
+        // priv = 3; // ❌ 编译报错
+    }
+};
+
+
+// ================= 3. 私有继承 (Private) =================
+// 特点：基类的 public 和 protected 成员在子类中全部被“降级”为 private。
+// 注意：如果是 class 继承 class，不写关键字的话，默认就是 private 继承！
+class PrivateDerived : private Base {
+public:
+    void accessTest() {
+        pub = 1;    // ✅ 变成了 private（只能在这个类内部访问，它的子类也看不到了）
+        prot = 2;   // ✅ 变成了 private
+        // priv = 3; // ❌ 编译报错
+    }
+};
+
+
+// ================= 外部访问测试 =================
+int main() {
+    PublicDerived pubObj;
+    pubObj.pub = 100;     // ✅ 外部可以访问 public 成员
+    // pubObj.prot = 100; // ❌ 报错：外部不可访问 protected
+
+    ProtectedDerived protObj;
+    // protObj.pub = 100; // ❌ 报错：pub 在 ProtectedDerived 中变成了 protected，对外部隐藏
+
+    PrivateDerived privObj;
+    // privObj.pub = 100; // ❌ 报错：pub 在 PrivateDerived 中变成了 private，对外部隐藏
+
+    return 0;
+}
+```
+
+#### 菱形继承与虚继承
+
+```c++
+#include <iostream>
+
+// ================= 场景 1：普通菱形继承（无隐藏指针） =================
+namespace DiamondProblem {
+    class Animal {
+    public:
+        int weight = 100; // 4 字节 (假设 32位 int)
+    };
+
+    class Tiger : public Animal {}; // 4 字节 (直接包含 Animal 的数据)
+    class Lion : public Animal {};  // 4 字节 (直接包含 Animal 的数据)
+
+    class Liger : public Tiger, public Lion {
+        // 内部包含 2 份 weight，总计 4 + 4 = 8 字节
+    };
+}
+
+
+// ================= 场景 2：虚继承（包含隐藏的 vbptr） =================
+namespace VirtualInheritance {
+    class Animal {
+    public:
+        int weight = 100; // 4 字节
+    };
+
+    // 🔑 发生虚继承，编译器会悄悄塞入一个 vbptr (虚基类指针)
+    // 内存布局：[ vbptr (8字节) ] + [ 共享的 Animal::weight (4字节) ] + [ 内存对齐填充 ]
+    class Tiger : virtual public Animal {}; 
+    
+    // 内存布局同上
+    class Lion : virtual public Animal {};  
+
+    // 🔑 Liger 多重继承了两个虚继承的父类
+    /* VLiger 的内存三明治布局：
+       1. Tiger 的 vbptr (指向 Tiger 的 vbtable，记录 Animal 的偏移量)
+       2. Lion 的 vbptr (指向 Lion 的 vbtable，记录 Animal 的偏移量)
+       3. 共享的 Animal::weight 数据 (被放在了内存最末尾)
+    */
+    class Liger : public Tiger, public Lion {
+    public:
+        void testAccess() {
+            weight = 300; // CPU 会通过 vbptr 查表，找到最末尾的 weight
+        }
+    };
+}
+
+// ================= 验证入口 =================
+int main() {
+    std::cout << "--- 1. 普通菱形继承的内存大小 (无额外开销) ---" << std::endl;
+    std::cout << "Animal 大小: " << sizeof(DiamondProblem::Animal) << " 字节" << std::endl;
+    std::cout << "Tiger 大小:  " << sizeof(DiamondProblem::Tiger) << " 字节" << std::endl;
+    std::cout << "Liger 大小:  " << sizeof(DiamondProblem::Liger) << " 字节 (2份int数据)" << std::endl;
+
+    std::cout << "\n--- 2. 虚继承的内存大小 (包含 vbptr 开销) ---" << std::endl;
+    std::cout << "Animal 大小: " << sizeof(VirtualInheritance::Animal) << " 字节" << std::endl;
+    // 注意：在 64 位系统下，由于加入了 8 字节的指针，加上内存对齐，大小会显著增加！
+    std::cout << "Tiger 大小:  " << sizeof(VirtualInheritance::Tiger) << " 字节 (包含隐藏指针 vbptr)" << std::endl;
+    std::cout << "Liger 大小:  " << sizeof(VirtualInheritance::Liger) << " 字节 (包含两个 vbptr + 1份共享数据)" << std::endl;
+
+    return 0;
+}
+```
+
+## C++内存分布
+
+![image-20260316210805813](assets/image-20260316210805813.png)
+
+- C++内存模型是在一块连续的虚拟内存上面开始排布的，每个进程都会以为自己有完整的地址（32位/64位）。这个会在CPU MMU单元的作用下，翻译成实际的地址去执行
+- 中间的栈区和堆区以及共享区的内容，会在运行时增长。因此考虑将其他固定的分布在两端，栈和堆区向中间增长，共享区的位置根据每个操作系统不同存放不同的地方
+
+### 内核空间
+
+**一、 内核空间“放什么”（核心资产）**
+
+内核空间存放的是操作系统的“本体”以及全系统的状态数据，主要包括：
+
+1. **内核代码段 (Kernel Code)**：操作系统的核心逻辑，包含进程调度算法、内存管理代码、以及控制各类底层硬件的驱动程序。
+2. **核心数据结构 (Data Structures)**：全系统的“总账本”。比如记录所有进程状态的**进程控制块 (PCB/`task_struct`)**，以及记录虚拟地址到物理地址映射关系的**全局页表 (Page Tables)**。
+3. **系统调用表 (Syscall Table)**：一张“合法服务菜单”，记录了所有允许普通程序调用的特权函数入口（如 `read`, `write`, `mmap`, `epoll_wait`）。
+4. **内核栈 (Kernel Stack)**：当你的程序进入特权模式（Ring 0）执行内核代码时，专用于存放内核临时变量的极小栈空间（每个进程都有专属的内核栈）。
+
+------
+
+**二、 内核空间“做什么事”（核心职能）**
+
+内核是软硬件之间的“大管家”和“安全保镖”，拥有 Ring 0 的最高执行权限，主要负责：
+
+1. **硬件控制与调度**：直接操控 CPU、显卡、网卡和磁盘等物理设备，并实时响应键盘、鼠标或网络数据包带来的硬件中断。
+2. **内存分配与管理**：充当“土地局”，负责给各个进程分配物理内存，维护虚拟地址的隔离，并在内存不够时进行页面置换（Swap）。
+3. **进程与线程调度**：充当“交通警察”，决定当前哪一个进程可以使用 CPU，并负责在不同进程之间进行高效的上下文切换。
+4. **安全隔离与保护**：作为系统的绝对防线，阻止任何普通程序直接越权操作硬件或窥探、篡改其他进程的内存数据。
+5. **提供系统调用**：充当“服务窗口”，让受限的普通程序能够通过标准接口（如文件 I/O、网络通信）安全地请求系统资源。
+
+### 栈
+
+栈区主要存放函数运行时的**临时数据**，其生命周期与函数调用绑定。
+
+- **局部变量**：你在函数内部定义的普通变量（如 `int a = 10;`）。
+- **函数参数**：调用函数时传入的参数值。
+- **返回地址**：函数执行完后，下一条指令该去哪执行。
+- **寄存器备份**：为了保护现场，在进入新函数前备份的 CPU 寄存器状态。
+
+### 堆
+
+**动态分配的对象**：例如 `new MyClass()` 产生的内容。
+
+**巨大的数据结构**：如果你需要开一个 $100\text{MB}$ 的数组，栈区放不下，必须放在堆区。
+
+**跨函数存在的数据**：函数运行结束了，但你希望数据依然存在（比如单例对象、全局缓存等）。
+
+**堆内部内存分配是不连续的**
+
+
+
+#### 堆区的核心特性（对比栈区）
+
+- **增长方向**：**向上增长**（向高地址方向）。正如我们之前聊的，它和栈“对向而行”。
+- **分配方式**：**离散且无序**。堆内存分配器会在巨大的地址空间里寻找合适的空闲块，所以两个连续 `new` 出来的对象，地址不一定是连续的。
+- **速度较慢**：分配堆内存需要经过分配算法（寻找空间、合并碎片、系统调用等），性能远低于直接移动指针的栈。
+- **碎片化**：频繁地申请和释放不同大小的块，会导致内存中出现很多细小的“空洞”，这就是**内存碎片**。
+
+#### 堆区的核心特性（对比栈区）
+
+- **增长方向**：**向上增长**（向高地址方向）。正如我们之前聊的，它和栈“对向而行”。
+- **分配方式**：**离散且无序**。堆内存分配器会在巨大的地址空间里寻找合适的空闲块，所以两个连续 `new` 出来的对象，地址不一定是连续的。
+- **速度较慢**：分配堆内存需要经过分配算法（寻找空间、合并碎片、系统调用等），性能远低于直接移动指针的栈。
+- **碎片化**：频繁地申请和释放不同大小的块，会导致内存中出现很多细小的“空洞”，这就是**内存碎片**。
+
+
+
+### BSS与数据段
+
+**BSS 存放未初始化的变量的目的：**减少EXE/ELF文件的大小，因为已初始化的信息会被放进文件内，在启动的时候加载到内存中。BSS只需要在启动时候分配空间就好了，无需再文件中存储的信息
+
+| **维度**           | **BSS 段 (.bss)**                              | **数据段 (.data)**                                 |
+| ------------------ | ---------------------------------------------- | -------------------------------------------------- |
+| **存放内容**       | **未初始化**或初始化为 0 的全局/静态变量。     | **已初始化且非零**的全局/静态变量。                |
+| **初始值**         | 默认由操作系统自动清零（0 或 `nullptr`）。     | 程序员在代码中显式指定的非零数值。                 |
+| **磁盘空间占用**   | **几乎为 0**（仅在文件头记录所需的大小信息）。 | **占用实际大小**（必须在磁盘上存下具体的初始值）。 |
+| **内存读写权限**   | 可读可写 (RW)                                  | 可读可写 (RW)                                      |
+| **运行时加载机制** | 仅划拨虚拟空间，并在物理内存中**清零**。       | 从磁盘将初始值**拷贝**到物理内存中。               |
+| **赋值后行为**     | 地址不动，内存中的值从 0 变为新值。            | 地址不动，内存中的值从旧值变为新值。               |
+| **典型 C++ 示例**  | `int g_val;` `static int s_val = 0;`           | `int g_val = 100;` `static int s_val = 7;`         |
+
+### 代码段&& 只读数据段
+
+这俩东西放在一起，因为他们是可读的，放在代码段的上方。
+
+#### 只读数据段
+
+| **数据类型**          | **代码示例 / 核心表现**                                | **为什么放这里？ (只读属性)**                              |
+| --------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| **字符串字面量**      | `"12313123"`                                           | 天生不可变，且方便编译器做“字符串去重池化”优化。           |
+| **全局/静态 const**   | `const int MAX = 100;` `static const float PI = 3.14;` | 具有全局生命周期，且被程序员显式声明为绝对不可修改。       |
+| **虚函数表 (vtable)** | 含有 `virtual` 函数的类的底层机制                      | C++ 多态的核心路由表，编译期就定死了，运行期绝不允许篡改。 |
+| **类型信息 (RTTI)**   | `typeid` / `dynamic_cast` 依赖的数据                   | 描述类结构的元数据，固定不变的“死数据”。                   |
+| **switch 跳转表**     | 编译器为密集 `switch-case` 生成的数组                  | 底层性能优化，存放固定的机器指令跳转地址。                 |
+
+### 代码段
+
+
+
+| **维度**         | **详细说明**                                                 |
+| ---------------- | ------------------------------------------------------------ |
+| **核心内容**     | CPU 可直接执行的机器指令（用户函数、编译器隐藏函数、动态库跳转存根 PLT）。 |
+| **存放方式**     | 按函数生成连续指令块；编译时会经历内联展开、指令重排和死代码消除。 |
+| **纯虚函数表现** | 纯虚函数接口本身无独立指令块，代码段仅存放派生类重写的具体实现指令。 |
+| **内存读写权限** | **只读 + 可执行 (R-X)**。严禁运行时修改，防止程序逻辑被恶意篡改。 |
+| **物理内存机制** | **多进程共享**。同一个程序的多个运行实例在 RAM 中只保留一份代码段副本。 |
+| **磁盘文件表现** | 占据可执行文件（如 ELF 格式）的绝大部分体积。                |
